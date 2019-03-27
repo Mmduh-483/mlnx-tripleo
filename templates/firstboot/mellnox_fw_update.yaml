@@ -1,0 +1,103 @@
+heat_template_version: queens
+
+description: >
+  This's a temporary workaround for upgrading Mellanox FW
+  and configuring Sriov in the FW
+
+parameters:
+  MlnxFwUpdaterPath:
+    type: string
+    default: ''
+    description: 'Path for mlnx farmware updater'
+  MAX_NUM_OF_VFS:
+    type: number
+    default: 0
+    description: 'Max number of vfs'
+  SRIOV_EN:
+    type: boolean
+    default: False
+    description: 'Enable/Disable Sriov'
+  LINK_TYPE:
+    type: string
+    default: 'eth'
+    description: 'Link type ["eth", "ib"]'
+
+resources:
+  userdata:
+    type: OS::Heat::MultipartMime
+    properties:
+      parts:
+      - config: {get_resource: mellanox_fw_update}
+        subtype: 'x-shellscript'
+
+  mellanox_fw_update:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          template: |
+            #!/bin/bash
+            set -eux
+            set -o pipefail
+            if [ $(rpm -qa | grep mlnx-fw-updater) ]
+            then
+              yum remove -y mlnx-fw-updater
+            fi
+            yum -y install $MLNX_FW_UPDATER_PATH
+            to_lower(){
+              echo "$1" | tr '[:upper:]' '[:lower:]'
+            }
+            
+            for bus in `lspci | grep Mellanox | awk '{b="0000"$1; print b}'`
+            do
+              ##################SET SRIOV_EN##################
+              CurrentSriovEN=$(to_lower $(mstconfig -d $bus q | grep SRIOV_EN | awk {'print $2'}))
+              SRIOV_EN_LOWER=$(to_lower $SRIOV_EN)
+              if [[ $CurrentSriovEN != *$SRIOV_EN_LOWER* ]]
+              then
+                mstconfig -d $bus -y set SRIOV_EN=$SRIOV_EN
+              fi
+
+              #################SET NUM_OF_VFS#################
+              CurrentNumOfVfs=$(mstconfig -d $bus q | grep NUM_OF_VFS | awk {'print $2'})
+              if [[ $CurrentNumOfVfs != $MAX_NUM_OF_VFS ]]
+              then
+                mstconfig -d $bus -y set NUM_OF_VFS=$MAX_NUM_OF_VFS
+              fi
+
+              ################SET LINK_TYPE_P1################
+              if [[ $(mstconfig -d $bus q | grep LINK_TYPE_P1) ]]
+              then
+                CurrentLinkTypeP1=$(to_lower $(mstconfig -d $bus q | grep LINK_TYPE_P1 | awk {'print $2'}))
+                LINK_TYPE_LOWER=$(to_lower $LINK_TYPE)
+                if [[ $CurrentLinkTypeP1 != *$LINK_TYPE_LOWER* ]]
+                then
+                  mstconfig -d $bus -y set LINK_TYPE_P1=$LINK_TYPE
+                fi
+              fi
+              ################SET LINK_TYPE_P1################
+              if [[ $(mstconfig -d $bus q | grep LINK_TYPE_P2) ]]
+              then
+                CurrentLinkTypeP2=$(to_lower $(mstconfig -d $bus q | grep LINK_TYPE_P2 | awk {'print $2'}))
+                LINK_TYPE_LOWER=$(to_lower $LINK_TYPE)
+                if [[ $CurrentLinkTypeP2 != *$LINK_TYPE_LOWER* ]]
+                then
+                  mstconfig -d $bus -y set LINK_TYPE_P2=$LINK_TYPE
+                fi
+              fi
+            done
+          params:
+            $MLNX_FW_UPDATER_PATH: {get_param: MlnxFwUpdaterPath}
+            $MAX_NUM_OF_VFS: {get_param: MAX_NUM_OF_VFS}
+            $SRIOV_EN: {get_param: SRIOV_EN}
+            $LINK_TYPE: {get_param: LINK_TYPE}
+
+
+outputs:
+  # This means get_resource from the parent template will get the userdata, see:
+  # http://docs.openstack.org/developer/heat/template_guide/composition.html#making-your-template-resource-more-transparent
+  # Note this is new-for-kilo, an alternative is returning a value then using
+  # get_attr in the parent template instead.
+  OS::stack_id:
+    value: {get_resource: userdata}
+
