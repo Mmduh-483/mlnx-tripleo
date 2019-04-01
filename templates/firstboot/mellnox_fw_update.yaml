@@ -5,17 +5,17 @@ description: >
   and configuring Sriov in the FW
 
 parameters:
-  MlnxFwUpdaterPath:
-    type: string
-    default: ''
-    description: 'Path for mlnx farmware updater'
-  MAX_NUM_OF_VFS:
+  FORCE_UPDATE:
+    type: boolean
+    default: False
+    description: "Force update the fw even if it's older version"
+  NUM_OF_VFS:
     type: number
-    default: 0
+    default: 32
     description: 'Max number of vfs'
   SRIOV_EN:
     type: boolean
-    default: False
+    default: True
     description: 'Enable/Disable Sriov'
   LINK_TYPE:
     type: string
@@ -36,59 +36,114 @@ resources:
       config:
         str_replace:
           template: |
-            #!/bin/bash
-            set -eux
-            set -o pipefail
-            if [ $(rpm -qa | grep mlnx-fw-updater) ]
-            then
-              yum remove -y mlnx-fw-updater
-            fi
-            yum -y install $MLNX_FW_UPDATER_PATH
-            to_lower(){
-              echo "$1" | tr '[:upper:]' '[:lower:]'
-            }
-            
-            for bus in `lspci | grep Mellanox | awk '{b="0000"$1; print b}'`
-            do
-              ##################SET SRIOV_EN##################
-              CurrentSriovEN=$(to_lower $(mstconfig -d $bus q | grep SRIOV_EN | awk {'print $2'}))
-              SRIOV_EN_LOWER=$(to_lower $SRIOV_EN)
-              if [[ $CurrentSriovEN != *$SRIOV_EN_LOWER* ]]
-              then
-                mstconfig -d $bus -y set SRIOV_EN=$SRIOV_EN
-              fi
+            #!/usr/bin/env python
 
-              #################SET NUM_OF_VFS#################
-              CurrentNumOfVfs=$(mstconfig -d $bus q | grep NUM_OF_VFS | awk {'print $2'})
-              if [[ $CurrentNumOfVfs != $MAX_NUM_OF_VFS ]]
-              then
-                mstconfig -d $bus -y set NUM_OF_VFS=$MAX_NUM_OF_VFS
-              fi
+            import logging
+            from lxml import etree
+            from oslo_concurrency import processutils
 
-              ################SET LINK_TYPE_P1################
-              if [[ $(mstconfig -d $bus q | grep LINK_TYPE_P1) ]]
-              then
-                CurrentLinkTypeP1=$(to_lower $(mstconfig -d $bus q | grep LINK_TYPE_P1 | awk {'print $2'}))
-                LINK_TYPE_LOWER=$(to_lower $LINK_TYPE)
-                if [[ $CurrentLinkTypeP1 != *$LINK_TYPE_LOWER* ]]
-                then
-                  mstconfig -d $bus -y set LINK_TYPE_P1=$LINK_TYPE
-                fi
-              fi
-              ################SET LINK_TYPE_P1################
-              if [[ $(mstconfig -d $bus q | grep LINK_TYPE_P2) ]]
-              then
-                CurrentLinkTypeP2=$(to_lower $(mstconfig -d $bus q | grep LINK_TYPE_P2 | awk {'print $2'}))
-                LINK_TYPE_LOWER=$(to_lower $LINK_TYPE)
-                if [[ $CurrentLinkTypeP2 != *$LINK_TYPE_LOWER* ]]
-                then
-                  mstconfig -d $bus -y set LINK_TYPE_P2=$LINK_TYPE
-                fi
-              fi
-            done
+            logging.basicConfig(filename='/var/log/mellnox_fw_update.log', filemode='w',
+                                level=logging.DEBUG)
+
+            _MLX_CONFIG = {"SRIOV_EN": "$SRIOV_EN", "NUM_OF_VFS": "$NUM_OF_VFS",
+                               "LINK_TYPE": "$LINK_TYPE", "LINK_TYPE_P1": "$LINK_TYPE",
+                               "LINK_TYPE_P2": "$LINK_TYPE"}
+            _FORCE_UPDATE = $FORCE_UPDATE
+            _MLXUP_PATH = "/opt/mlxup"
+
+
+            def mstconfig_parse_data(data):
+              # Parsing the mstconfig out to json
+              data = list(filter(None,data.split('\n')))
+              r={}
+              c = 0
+              for line in data:
+                c+=1
+                if 'Configurations:'in line:
+                  break
+              for i in range(c,len(data)):
+                d = list(filter(None,data[i].strip().split()))
+                r[d[0]]=d[1]
+              return r
+
+
+            def run_command(*cmd, **kwargs):
+              logging.info("Running %s" % ' '.join(cmd))
+              try:
+                out, err = processutils.execute(*cmd, **kwargs)
+              except processutils.ProcessExecutionError:
+                logging.error("Failed to execute %s" % ' '.join(cmd))
+                raise
+              if err:
+                logging.error(err)
+                exit(1)
+              logging.debug(out)
+              return out
+
+
+            def get_devices():
+              out = run_command(_MLXUP_PATH, "--query-format", "xml")
+              tree = etree.XML(out)
+              return tree.xpath("Device")
+
+
+            def check_for_fw_update(device):
+              bus = device.attrib.get('pciName')
+              current_fw = device.xpath("Versions/FW")[0].attrib.get('current')
+              available_fw = device.xpath("Versions/FW")[0].attrib.get('available')
+              if available_fw == "N/A":
+                return False
+              else:
+                return available_fw > current_fw
+
+
+            def update_fw(bus, force_update=False):
+              # Updating the fw
+              logging.info("Updateing FW for device %s" % bus)
+              cmd = [_MLXUP_PATH, "-d", bus, "-u", "-y"]
+              if force_update:
+                cmd.append("--froce")
+              run_command(*cmd)
+
+
+            def get_device_conf_dict(bus):
+              out= run_command("mstconfig", "-d", bus, "q")
+              return mstconfig_parse_data(out)
+
+
+            def set_conf(bus):
+              current_mlx_config = get_device_conf_dict(bus)
+              for key, value in _MLX_CONFIG.items():
+                if current_mlx_config.get(key) and value.lower() not in current_mlx_config.get(key).lower():
+                  # Setting the configuration for mellanox device
+                  run_command("mstconfig", "-d", bus, "-y", "set",
+                              "%s=%s" % (key, value))
+                  logging.info("Setting %s to %s done successfully" % (key, value))
+
+
+            def main():
+              # Getting the mellanox devices
+              devices = get_devices()
+
+              for device in devices:
+                bus = device.attrib.get('pciName')
+
+                if _FORCE_UPDATE:
+                  # Force updating the fw
+                  update_fw(bus, force_update=True)
+                elif check_for_fw_update(device):
+                  # Updating the fw
+                  update_fw(bus)
+
+                # Setting the configuration for mellanox device
+                set_conf(bus)
+
+            if __name__ == '__main__':
+              main()
+
           params:
-            $MLNX_FW_UPDATER_PATH: {get_param: MlnxFwUpdaterPath}
-            $MAX_NUM_OF_VFS: {get_param: MAX_NUM_OF_VFS}
+            $FORCE_UPDATE: {get_param: FORCE_UPDATE}
+            $NUM_OF_VFS: {get_param: NUM_OF_VFS}
             $SRIOV_EN: {get_param: SRIOV_EN}
             $LINK_TYPE: {get_param: LINK_TYPE}
 
@@ -100,4 +155,3 @@ outputs:
   # get_attr in the parent template instead.
   OS::stack_id:
     value: {get_resource: userdata}
-
