@@ -3,9 +3,4 @@
     name: 'mlnx-ofa_kernel'
     state: absent
   when: step == "3"
-- name: install rhel-7.7 kernel
-  yum:
-    name: http://192.168.24.1/kernel-3.10.0-1022.el7.bz1688717.x86_64.rpm
-    state: present
-  when: step == "3"
-
+  
