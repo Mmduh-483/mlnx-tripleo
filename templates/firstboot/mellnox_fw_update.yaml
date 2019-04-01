@@ -102,7 +102,7 @@ resources:
               logging.info("Updateing FW for device %s" % bus)
               cmd = [_MLXUP_PATH, "-d", bus, "-u", "-y"]
               if force_update:
-                cmd.append("--froce")
+                cmd.append("--force")
               run_command(*cmd)
 
 
