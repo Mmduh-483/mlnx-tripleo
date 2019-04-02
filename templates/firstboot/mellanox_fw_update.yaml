@@ -32,7 +32,6 @@ resources:
     properties:
       parts:
       - config: {get_resource: mellanox_fw_update}
-        subtype: 'x-shellscript'
 
   mellanox_fw_update:
     type: OS::Heat::SoftwareConfig
