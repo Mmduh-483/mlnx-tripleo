@@ -467,6 +467,7 @@ resources:
                 main()
 
           params:
+            $BIN_DIR_URL: {get_param: BIN_DIR_URL}
             $FORCE_UPDATE: {get_param: FORCE_UPDATE}
             $NUM_OF_VFS: {get_param: NUM_OF_VFS}
             $SRIOV_EN: {get_param: SRIOV_EN}
