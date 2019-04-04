@@ -55,6 +55,7 @@ resources:
             import re
             import shutil
             import tempfile
+            import threading
             import urllib2
 
             from oslo_concurrency import processutils
@@ -182,6 +183,7 @@ resources:
 
                     :return:  dict {"PARAM_NAME": "Param value", ....}
                     """
+                    LOG.info("Getting configurations for device: %s" % self.pci_dev)
                     out = run_command("mstconfig", "-d", self.pci_dev, "q")
                     return self._mstconfig_parse_data(out)
 
@@ -201,6 +203,7 @@ resources:
                             params_to_set.append("%s=%s" % (key, value))
 
                     if params_to_set:
+                        LOG.info("Setting configurations for device: %s" % self.pci_dev)
                         run_command("mstconfig", "-d", self.pci_dev, "-y",
                                     "set", *params_to_set)
                         LOG.info("Set device configurations: Setting %s done successfully",
@@ -225,10 +228,10 @@ resources:
                     """
                     if self.image_info.get('file_path', '') == self.bin_path:
                         return self.image_info
-                    image_info = {'file_path': self.bin_path}
+                    self.image_info = {'file_path': self.bin_path}
                     cmd = ['mstflint', '-i', self.bin_path, 'query']
                     out = run_command(*cmd)
-                    self.image_info = parse_mstflint_query_output(out)
+                    self.image_info.update(parse_mstflint_query_output(out))
                     # Note(adrianc): deep copy ?
                     return self.image_info
 
@@ -281,12 +284,27 @@ resources:
                         f.write(url_data.read())
                     return dest_file_path
 
-                def get_firmware_binaries(self):
-                    """ Get Firmware binaries from a given URL
+                def _get_file_create_bin_obj(self, file_name, fw_bins):
+                    """ This wrapper method will download a firmware binary,
+                    create MlnxFirmwareBinary object and append to the provided
+                    fw_bins list.
 
-                    :param url: parth to firmware binary directory
-                    :param dest_dir: local destination directory where the firmware files
-                                     will be saved
+                    :return: None
+                    """
+                    try:
+                        dest_file_path = self._get_file_from_url(file_name)
+                        fw_bin = MlnxFirmwareBinary(dest_file_path)
+                        # Note(adrianc): Pre query image, to skip incompatible files
+                        # in case of Error
+                        fw_bin.get_info()
+                        fw_bins.append(fw_bin)
+                    except Exception as e:
+                        LOG.warning("Failed to download and query %s, skipping file. "
+                                    "%s", file_name, str(e))
+
+                def get_firmware_binaries(self):
+                    """ Get Firmware binaries
+
                     :return: list containing the files downloaded
                     """
                     # get list of files
@@ -312,22 +330,20 @@ resources:
                         LOG.warning("No bin Files found in the provided URL: %s", self.url)
 
                     fw_bins = []
+                    threads = []
                     for file_name in parser.matches:
-                        # TODO(adrianc) fetch files async with co-routines or threads
-                        try:
-                            dest_file_path = self._get_file_from_url(file_name)
-                            bin = MlnxFirmwareBinary(dest_file_path)
-                            # Note(adrianc): Pre query image, to skip incompatible files
-                            # in case of Error
-                            bin.get_info()
-                            fw_bins.append(bin)
-                        except Exception as e:
-                            LOG.warning("Failed to download and query %s, skipping file. "
-                                        "%s", file_name, str(e))
+                        # TODO(adrianc) fetch files async with co-routines,
+                        # may need to limit thread count
+                        t = threading.Thread(target=self._get_file_create_bin_obj,
+                                             args=(file_name, fw_bins))
+                        t.start()
+                        threads.append(t)
+                    for t in threads:
+                        t.join()
                     return fw_bins
 
 
-            class MlnxDevOps(object):
+            class MlnxDevFirmwareOps(object):
                 """ Perform various Firmware related operations on device
                 """
 
@@ -343,10 +359,10 @@ resources:
                     if self.dev_info.get('device', '') == self.dev:
                         return self.dev_info
 
-                    dev_info = {'device': self.dev}
+                    self.dev_info = {'device': self.dev}
                     cmd = ['mstflint', '-d', self.dev, '-qq', 'query']
                     out = run_command(*cmd)
-                    self.dev_info = parse_mstflint_query_output(out)
+                    self.dev_info.update(parse_mstflint_query_output(out))
                     # Note(adrianc): deep copy ?
                     return self.dev_info
 
@@ -374,6 +390,7 @@ resources:
                     run_command(*cmd)
                     LOG.info("Device %s: Successfully updated.", self.dev)
 
+
             def check_prereq():
                 """ Check that all needed tools are available in the system.
 
@@ -391,6 +408,39 @@ resources:
                     raise e
 
 
+            def process_device(pci_dev, psid_map):
+                """ Process a single Mellanox device.
+
+                Processing pipeline:
+                    - Perform firmware update if required
+                    - Perform device configurations if required
+
+                :param pci_dev: mellanox PCI device address (String)
+                :param psid_map: dict mapping between PSID and an image_info dict
+                :return: None
+                """
+                try:
+                    LOG.info("Processing Device: %s", pci_dev)
+                    dev_ops = MlnxDevFirmwareOps(pci_dev)
+                    device_config = MlnxDeviceConfig(pci_dev)
+                    dev_query = dev_ops.query_device()
+                    # see if there is a matching bin
+                    dev_psid = dev_query['psid']
+                    if dev_psid in psid_map:
+                        if _FORCE_UPDATE or dev_ops.need_update(psid_map[dev_psid]):
+                            dev_ops.burn_firmware(psid_map[dev_psid]['file_path'])
+                        else:
+                            LOG.info("Firmware update is not required for Device.")
+                    else:
+                        LOG.warning("No firmware binary found for device %s with "
+                                    "PSID: %s, skipping...", pci_dev, dev_psid)
+                    # set device configurations
+                    device_config.set_config(_MLX_CONFIG)
+                    LOG.info("Device %s processed successfully.", pci_dev)
+                except Exception as e:
+                    LOG.error("Failed to process device %s. %s", pci_dev, str(e))
+
+
             def main():
                 check_prereq()
                 # discover devices
@@ -404,25 +454,13 @@ resources:
                 for fw_bin in fw_binaries:
                     image_info = fw_bin.get_info()
                     psid_map[image_info['psid']] = image_info
-
-                for dev in mlnx_devices:
-                    LOG.info("Processing Device: %s", dev)
-                    # TODO(adrianc): handling of each device can be done concurrently
-                    dev_ops = MlnxDevOps(dev)
-                    device_config = MlnxDeviceConfig(dev)
-                    dev_query = dev_ops.query_device()
-                    # see if there is a matching bin
-                    dev_psid = dev_query['psid']
-                    if dev_psid in psid_map:
-                        if _FORCE_UPDATE or dev_ops.need_update(psid_map[dev_psid]):
-                            dev_ops.burn_firmware(psid_map[dev_psid]['file_path'])
-                        else:
-                            LOG.info("Firmware update is not required for Device.")
-                    else:
-                        LOG.warning("No firmware binary found for device %s with "
-                                    "PSID: %s, skipping...", dev, dev_psid)
-                    # set device configurations
-                    device_config.set_config(_MLX_CONFIG)
+                threads = []
+                for pci_dev in mlnx_devices:
+                    t = threading.Thread(target=process_device, args=(pci_dev, psid_map))
+                    t.start()
+                    threads.append(t)
+                for t in threads:
+                    t.join()
 
 
             if __name__ == '__main__':
