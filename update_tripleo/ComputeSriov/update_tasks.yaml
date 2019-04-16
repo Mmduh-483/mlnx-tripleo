@@ -1,6 +1,10 @@
-- name: remove mlnx-ofa_kernel rpm
-  yum:
-    name: 'mlnx-ofa_kernel'
-    state: absent
-  when: step == "3"
-  
+        - name: remove kmod-mlnx-en rpm
+          yum:
+            name: 'kmod-mlnx-en'
+            state: absent
+          when: step == "3"
+        - name: remove mlnx-en-utils rpm
+          yum:
+            name: 'mlnx-en-utils'
+            state: absent
+          when: step == "3"
