@@ -62,6 +62,7 @@ resources:
 
 
             FW_VERSION_REGEX = r'FW Version:\s*\t*(?P<fw_ver>\d+\.\d+\.\d+)'
+            RUNNING_FW_VERSION_REGEX = r'FW Version\(Running\):\s*\t*(?P<fw_ver>\d+\.\d+\.\d+)'
             PSID_REGEX = r'PSID:\s*\t*(?P<psid>\w+)'
 
             _FORCE_UPDATE = $FORCE_UPDATE
@@ -90,8 +91,7 @@ resources:
                     LOG.error("Failed to execute %s, %s", ' '.join(cmd), str(e))
                     raise e
                 if err:
-                    LOG.error(err)
-                    exit(1)
+                    LOG.warning("Got stderr output: %s" % err)
                 LOG.debug(out)
                 return out
 
@@ -108,8 +108,11 @@ resources:
                 for line in out.split('\n'):
                     fw_ver = re.match(FW_VERSION_REGEX, line)
                     psid = re.match(PSID_REGEX, line)
+                    running_fw_ver = re.match(RUNNING_FW_VERSION_REGEX, line)
                     if fw_ver:
                         query_info["fw_ver"] = fw_ver.group('fw_ver')
+                    if running_fw_ver:
+                        query_info["running_fw_ver"] = running_fw_ver.group('fw_ver')
                     if psid:
                         query_info["psid"] = psid.group('psid')
                 return query_info
@@ -163,6 +166,7 @@ resources:
 
                 def __init__(self, pci_dev):
                     self.pci_dev = pci_dev
+                    self._tool_confs = None
 
                 def _mstconfig_parse_data(self, data):
                     # Parsing the mstconfig out to json
@@ -187,6 +191,16 @@ resources:
                     out = run_command("mstconfig", "-d", self.pci_dev, "q")
                     return self._mstconfig_parse_data(out)
 
+                def param_supp_by_config_tool(self, param_name):
+                    """ Check if configuration tool supports the provided configuration
+                    parameter.
+                    :param param_name: configuration name
+                    :return: bool
+                    """
+                    if self._tool_confs is None:
+                        self._tool_confs = run_command("mstconfig", "-d", self.pci_dev, "i")
+                    return param_name in self._tool_confs
+
                 def set_config(self, conf_dict):
                     """ Set device configurations
 
@@ -197,6 +211,11 @@ resources:
                     current_mlx_config = self.get_device_conf_dict()
                     params_to_set = []
                     for key, value in conf_dict.items():
+                        if not self.param_supp_by_config_tool(key):
+                            LOG.error("Configuraiton: %s is not supported by mstconfig,"
+                                      " please update to the latest mstflint package." % key)
+                            continue
+
                         if current_mlx_config.get(key) and value.lower(
                         ) not in current_mlx_config.get(key).lower():
                             # Aggregate all configurations required to be modified
@@ -351,18 +370,19 @@ resources:
                     self.dev = dev
                     self.dev_info = {}
 
-                def query_device(self):
+                def query_device(self, force=False):
                     """ Get firmware information from device
-
+                    :param force: force device query, even if query was executed in
+                                  previous calls.
                     :return: dict of firmware image attributes
                     """
-                    if self.dev_info.get('device', '') == self.dev:
+                    if not force and self.dev_info.get('device', '') == self.dev:
                         return self.dev_info
 
                     self.dev_info = {'device': self.dev}
                     cmd = ['mstflint', '-d', self.dev, '-qq', 'query']
                     out = run_command(*cmd)
-                    self.dev_info.update(parse_mstflint_query_output(out))
+                    self.dev_info = parse_mstflint_query_output(out)
                     # Note(adrianc): deep copy ?
                     return self.dev_info
 
@@ -375,7 +395,28 @@ resources:
                     """
                     if not self.dev_info:
                         self.query_device()
+                    LOG.info("Device firmware version: %s, Image firmware version: %s" %
+                             (self.dev_info['fw_ver'], image_info['fw_ver']))
                     return self.dev_info['fw_ver'] < image_info['fw_ver']
+
+                def need_reset_before_config(self):
+                     """ Check if device requires firmware reset before applying any
+                     configurations on the device.
+                     :return: bool, True if reset is needed
+                     """
+                     self.query_device(force=True)
+                     next_boot_image_newer = 'running_fw_ver' in self.dev_info and \
+                            self.dev_info['running_fw_ver'] < self.dev_info['fw_ver']
+                     if next_boot_image_newer:
+                         mandatory_params = ["ESWITCH_IPV4_TTL_MODIFY_ENABLE",
+                                             "PRIO_TAG_REQUIRED_EN"]
+                         device_config = MlnxDeviceConfig(self.dev)
+                         conf_dict = device_config.get_device_conf_dict()
+                         for param in mandatory_params:
+                             if param not in conf_dict and \
+                                     device_config.param_supp_by_config_tool(param):
+                                 return True
+                     return False
 
                 def burn_firmware(self, image_path):
                     """ Burn firmware on device
@@ -389,6 +430,14 @@ resources:
                            "-y", "burn"]
                     run_command(*cmd)
                     LOG.info("Device %s: Successfully updated.", self.dev)
+                def reset_device(self):
+                     """ Reset firmware
+                     :return: None
+                     """
+                     LOG.info("Device %s: Performing firmware reset.", self.dev)
+                     cmd = ["mstfwreset", "-d", self.dev, "-y", "reset"]
+                     run_command(*cmd)
+                     LOG.info("Device %s: Firmware successfully reset.", self.dev)
 
 
             def check_prereq():
@@ -401,6 +450,8 @@ resources:
                     run_command('mstflint', '-v')
                     # check for mstconfig
                     run_command('mstconfig', '-v')
+                    # check for mstfwreset
+                    run_command('mstfwreset', '-v')
                     # check for lspci
                     run_command('lspci', '--version')
                 except Exception as e:
@@ -413,6 +464,7 @@ resources:
 
                 Processing pipeline:
                     - Perform firmware update if required
+                    - Reset device to load firmware if required
                     - Perform device configurations if required
 
                 :param pci_dev: mellanox PCI device address (String)
@@ -434,6 +486,11 @@ resources:
                     else:
                         LOG.warning("No firmware binary found for device %s with "
                                     "PSID: %s, skipping...", pci_dev, dev_psid)
+                    # check if reset is required.
+                    # Note: device Reset is required if a newer firmware version was burnt
+                    # and current firmware does not support some mandatory configurations.
+                    if dev_ops.need_reset_before_config():
+                        dev_ops.reset_device()
                     # set device configurations
                     device_config.set_config(_MLX_CONFIG)
                     LOG.info("Device %s processed successfully.", pci_dev)
@@ -454,14 +511,9 @@ resources:
                 for fw_bin in fw_binaries:
                     image_info = fw_bin.get_info()
                     psid_map[image_info['psid']] = image_info
-                threads = []
+                # process devices
                 for pci_dev in mlnx_devices:
-                    t = threading.Thread(target=process_device, args=(pci_dev, psid_map))
-                    t.start()
-                    threads.append(t)
-                for t in threads:
-                    t.join()
-
+                    process_device(pci_dev, psid_map)
 
             if __name__ == '__main__':
                 main()
