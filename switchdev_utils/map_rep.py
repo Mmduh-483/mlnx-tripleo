@@ -85,7 +85,11 @@ def parse_pci_address(domain, bus, slot, function):
 
 def get_domains_pcis():
     domains_pcis = dict()
-    conn = libvirt.open('qemu:///system')
+    try:
+        conn = libvirt.open('qemu:///system')
+    except libvirt.libvirtError:
+        return None
+
     if conn is None:
         return None
     domainIDs = conn.listDomainsID()
@@ -179,7 +183,7 @@ def _get_pf_func(pf_ifname):
     return None
 
 
-def get_representor_port(pf_ifname):
+def get_representor_port_list(pf_ifname):
     """Get the representor netdevice which is corresponding to the VF.
     This method gets PF interface name and number of VF. It iterates over all
     the interfaces under the PF location and looks for interface that has the
@@ -187,7 +191,6 @@ def get_representor_port(pf_ifname):
     the requested VF.
     """
 
-    domains_pcis = get_domains_pcis()
     pf_path = "/sys/class/net/%s" % pf_ifname
     pf_sw_id_file = os.path.join(pf_path, "phys_switch_id")
     pf_sw_id = None
@@ -265,20 +268,28 @@ def get_representor_port(pf_ifname):
             ("REPRESENTOR PORT", device),
             ("VF PORT", vf_port_name),
             ("VF PCI", vf_pci),
-            ("PF NAME", pf_ifname),
-            ("MACHINE NAME",
-             (domains_pcis.get(vf_pci).get("domain_name")
-              if domains_pcis.get(vf_pci) else "")),
-            ("MACHINE UUID",
-             (domains_pcis.get(vf_pci).get("domain_id")
-              if domains_pcis.get(vf_pci) else ""))]))
+            ("PF NAME", pf_ifname)]))
         rep_list.sort(key=lambda x: x.get("VF NUMBER"))
+    return rep_list
+
+def map_rep_to_domains(domains_pcis, rep_list):
+    for rep in rep_list:
+        vf_pci = rep.get("VF PCI")
+        if domains_pcis.get(vf_pci):
+            rep["MACHINE NAME"] = domains_pcis.get(vf_pci).get("domain_name")
+            rep["MACHINE UUID"] = domains_pcis.get(vf_pci).get("domain_id")
+        else:
+            rep["MACHINE NAME"] = ""
+            rep["MACHINE UUID"] = ""
     return rep_list
 
 
 def main():
     device_name = parse_opts().port
-    rep_list = get_representor_port(device_name)
+    domains_pcis = get_domains_pcis()
+    rep_list = get_representor_port_list(device_name)
+    if domains_pcis is not None and len(domains_pcis) != 0:
+        rep_list = map_rep_to_domains(domains_pcis, rep_list)
     print(tabulate(rep_list, headers="keys"))
 
 
