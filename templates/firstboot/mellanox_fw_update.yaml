@@ -27,11 +27,11 @@ parameters:
     description: 'Link type ["eth", "ib"]'
   ESWITCH_IPV4_TTL_MODIFY_ENABLE:
     type: boolean
-    default: True
+    default: False
     description: 'Enable TTL modification by E-Switch'
   PRIO_TAG_REQUIRED_EN:
     type: boolean
-    default: True
+    default: False
     description: 'Priority tag required'
 
 resources:
