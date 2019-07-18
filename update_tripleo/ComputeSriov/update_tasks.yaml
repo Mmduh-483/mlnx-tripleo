@@ -8,3 +8,13 @@
             name: 'mlnx-en-utils'
             state: absent
           when: step == "3"
+        - name: remove mstflint rpm
+          yum:
+            name: 'mstflint'
+            state: absent
+          when: step == "3"
+        - name: install mstflint
+          yum:
+            name: 'mstflint'
+            state: present
+          when: step == "3"
