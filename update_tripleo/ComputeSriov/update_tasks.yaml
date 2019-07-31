@@ -2,17 +2,17 @@
           yum:
             name: 'kmod-mlnx-en'
             state: absent
-          when: step == "3"
+          when: step == "2"
         - name: remove mlnx-en-utils rpm
           yum:
             name: 'mlnx-en-utils'
             state: absent
-          when: step == "3"
+          when: step == "2"
         - name: remove mstflint rpm
           yum:
             name: 'mstflint'
             state: absent
-          when: step == "3"
+          when: step == "2"
         - name: install mstflint
           yum:
             name: 'mstflint'
