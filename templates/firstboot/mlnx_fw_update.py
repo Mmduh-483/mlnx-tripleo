@@ -1,13 +1,15 @@
 #!/usr/bin/env python
 
-from HTMLParser import HTMLParser
 import logging
 import os
 import re
 import shutil
 import tempfile
 import threading
-import urllib2
+
+from six.moves import html_parser
+from six.moves.urllib import request as urlRequest
+from six.moves.urllib import error as urlError
 
 from oslo_concurrency import processutils
 
@@ -105,10 +107,7 @@ class MlnxDevices(object):
         return self._devs.__iter__()
 
     def __next__(self):
-        return self._devs.__iter__()
-
-    def next(self):
-        return self.__next__()
+        return self._devs.__next__()
 
 
 class MlnxDeviceConfig(object):
@@ -215,13 +214,13 @@ class MlnxFirmwareBinariesFetcher(object):
     """
     dest_dir = tempfile.mkdtemp(suffix="tripleo_mlnx_firmware")
 
-    class FileHTMLParser(HTMLParser):
+    class FileHTMLParser(html_parser.HTMLParser):
         """ A crude HTML Parser to extract files from an HTTP response.
         """
 
         def __init__(self, suffix):
             # HTMLParser is Old style class dont use super() method
-            HTMLParser.__init__(self)
+            html_parser.HTMLParser.__init__(self)
             self.matches = []
             self.suffix = suffix
 
@@ -245,8 +244,8 @@ class MlnxFirmwareBinariesFetcher(object):
             full_path = self.url + "/" + file_name
             LOG.info("Downloading file: %s to %s", full_path,
                      MlnxFirmwareBinariesFetcher.dest_dir)
-            url_data = urllib2.urlopen(full_path)
-        except urllib2.HTTPError as e:
+            url_data = urlRequest.urlopen(full_path)
+        except urlError.HTTPError as e:
             LOG.error("Failed to download data: %s", str(e))
             raise e
         dest_file_path = os.path.join(MlnxFirmwareBinariesFetcher.dest_dir,
@@ -290,8 +289,8 @@ class MlnxFirmwareBinariesFetcher(object):
                                '(e.g "http://<your_ip>/mlnx_bins/"). '
                                'Given URL path: %s', self.url)
         try:
-            index_data = urllib2.urlopen(_BIN_DIR_URL).read()
-        except urllib2.HTTPError as err:
+            index_data = str(urlRequest.urlopen(_BIN_DIR_URL).read())
+        except urlError.HTTPError as err:
             LOG.error(err)
             raise err
         parser = MlnxFirmwareBinariesFetcher.FileHTMLParser(suffix=".bin")
