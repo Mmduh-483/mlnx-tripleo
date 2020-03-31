@@ -17,6 +17,7 @@ FW_VERSION_REGEX = r'FW Version:\s*\t*(?P<fw_ver>\d+\.\d+\.\d+)'
 RUNNING_FW_VERSION_REGEX = r'FW Version\(Running\):\s*\t*(?P<fw_ver>\d+\.\d+\.\d+)'
 PSID_REGEX = r'PSID:\s*\t*(?P<psid>\w+)'
 
+_DEV_WHITE_LIST = $DEV_WHITE_LIST
 _FORCE_UPDATE = $FORCE_UPDATE
 _BIN_DIR_URL = "$BIN_DIR_URL"
 
@@ -77,8 +78,9 @@ class MlnxDevices(object):
     Can be used as an iterator once discover has been called.
     """
 
-    def __init__(self):
+    def __init__(self, dev_white_list):
         self._devs = []
+        self._dev_white_list = dev_white_list
 
     def discover(self):
         """ Discover Mellanox devices in the system. (first PF of every device)
@@ -89,16 +91,22 @@ class MlnxDevices(object):
             return self._devs
 
         devs = []
-        cmd = ['lspci', '-d', '15b3:']
+        cmd = ['lspci', '-D', '-d', '15b3:']
         out = run_command(*cmd)
         for line in out.split('\n'):
             if not line:
                 continue
             dev = line.split()[0]
-            if dev.endswith('.0'):
+            if dev.endswith('.0') and (not self._dev_white_list or
+                    dev in self._dev_white_list):
                 devs.append(dev)
         self._devs = devs
         LOG.info("Found Mellanox devices: %s", devs)
+        other_devs = set(self._dev_white_list) - set(devs)
+        if other_devs:
+             LOG.warning("Not all devices in PCI white list where discovered,"
+                         " %s these may not be mellanox devices or have their "
+                         "PCI function set to non zero." % other_devs)
 
     def __len__(self):
         return len(self._devs)
@@ -456,7 +464,7 @@ def process_device(pci_dev, psid_map):
 def main():
     check_prereq()
     # discover devices
-    mlnx_devices = MlnxDevices()
+    mlnx_devices = MlnxDevices(_DEV_WHITE_LIST)
     mlnx_devices.discover()
     # get binaries
     binary_getter = MlnxFirmwareBinariesFetcher(_BIN_DIR_URL)
