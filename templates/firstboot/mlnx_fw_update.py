@@ -16,12 +16,13 @@ from oslo_concurrency import processutils
 FW_VERSION_REGEX = r'FW Version:\s*\t*(?P<fw_ver>\d+\.\d+\.\d+)'
 RUNNING_FW_VERSION_REGEX = r'FW Version\(Running\):\s*\t*(?P<fw_ver>\d+\.\d+\.\d+)'
 PSID_REGEX = r'PSID:\s*\t*(?P<psid>\w+)'
+ARRAY_VALUE_REGEX = r'Array\[(?P<first_index>\d+)\.\.(?P<last_index>\d+)\]'
 
-_DEV_WHITE_LIST = $DEV_WHITE_LIST
-_FORCE_UPDATE = $FORCE_UPDATE
-_BIN_DIR_URL = "$BIN_DIR_URL"
+_DEV_WHITE_LIST = []
+_FORCE_UPDATE = False
+_BIN_DIR_URL = ""
 
-#TODO(adrianc): add configurable parameter for logging
+# TODO(adrianc): add configurable parameter for logging
 logging.basicConfig(
     filename='/var/log/mellnox_fw_update.log',
     filemode='w',
@@ -29,12 +30,14 @@ logging.basicConfig(
 LOG = logging.getLogger("mellnox_fw_update")
 
 _MLX_CONFIG = {
-    "SRIOV_EN": "$SRIOV_EN",
-    "NUM_OF_VFS": "$NUM_OF_VFS",
-    "LINK_TYPE_P1": "$LINK_TYPE",
-    "LINK_TYPE_P2": "$LINK_TYPE",
-    "ESWITCH_IPV4_TTL_MODIFY_ENABLE": "$ESWITCH_IPV4_TTL_MODIFY_ENABLE",
-    "PRIO_TAG_REQUIRED_EN": "$PRIO_TAG_REQUIRED_EN"
+    "SRIOV_EN": "True",
+    "NUM_OF_VFS": "32",
+    "LINK_TYPE_P1": "eth",
+    "LINK_TYPE_P2": "eth",
+    "ESWITCH_IPV4_TTL_MODIFY_ENABLE": "False",
+    "PRIO_TAG_REQUIRED_EN": "False",
+    "ESWITCH_HAIRPIN_TOT_BUFFER_SIZE": {"*": "17"},
+    "ESWITCH_HAIRPIN_DESCRIPTORS": {"*": "11"}
 }
 
 
@@ -104,9 +107,9 @@ class MlnxDevices(object):
         LOG.info("Found Mellanox devices: %s", devs)
         other_devs = set(self._dev_white_list) - set(devs)
         if other_devs:
-             LOG.warning("Not all devices in PCI white list where discovered,"
-                         " %s these may not be mellanox devices or have their "
-                         "PCI function set to non zero." % other_devs)
+            LOG.warning("Not all devices in PCI white list where discovered,"
+                        " %s these may not be mellanox devices or have their "
+                        "PCI function set to non zero." % other_devs)
 
     def __len__(self):
         return len(self._devs)
@@ -125,6 +128,7 @@ class MlnxDeviceConfig(object):
     def __init__(self, pci_dev):
         self.pci_dev = pci_dev
         self._tool_confs = None
+        self.arrayed_mlnx_config = {}
 
     def _mstconfig_parse_data(self, data):
         # Parsing the mstconfig out to json
@@ -137,16 +141,30 @@ class MlnxDeviceConfig(object):
                 break
         for i in range(c, len(data)):
             d = list(filter(None, data[i].strip().split()))
+            array_value = re.match(ARRAY_VALUE_REGEX, d[1])
+            if array_value:
+                first_index = array_value.group('first_index')
+                last_index =  array_value.group('last_index')
+                self.arrayed_mlnx_config[d[0]] = [first_index, last_index]
+                array_param_dict = self.get_device_conf_dict("%s[%s..%s]" % (
+                        d[0], first_index, last_index))
+                for key, value in array_param_dict.items():
+                    r[key] = value
+                    continue
             r[d[0]] = d[1]
         return r
 
-    def get_device_conf_dict(self):
-        """ Get device Configurations
+    def get_device_conf_dict(self, param_name=None):
+        """ Get device Configurations or a specific one
 
+        :param param_name: configuration name
         :return:  dict {"PARAM_NAME": "Param value", ....}
         """
         LOG.info("Getting configurations for device: %s" % self.pci_dev)
-        out = run_command("mstconfig", "-d", self.pci_dev, "q")
+        cmd = ["mstconfig", "-d", self.pci_dev, "q"]
+        if param:
+            cmd.append(param)
+        out = run_command(*cmd)
         return self._mstconfig_parse_data(out)
 
     def param_supp_by_config_tool(self, param_name):
@@ -174,7 +192,30 @@ class MlnxDeviceConfig(object):
                 LOG.error("Configuraiton: %s is not supported by mstconfig,"
                             " please update to the latest mstflint package." % key)
                 continue
-            if current_mlx_config.get(key) and value.lower(
+            if key in self.arrayed_mlnx_config.keys():
+                if value.get('*'):
+                    # Aggregate required configuration for all the indexes
+                    first_index = int(self.arrayed_mlnx_config[key][0])
+                    last_index = int(self.arrayed_mlnx_config[key][1]) + 1
+                    param_value = value.get('*')
+                    for i in range(first_index, last_index):
+                        param_key = "%s[%s]" % (key, i)
+                        if current_mlx_config.get(param_key) and \
+                                param_value.lower() not in \
+                                current_mlx_config.get(param_key).lower():
+                            params_to_set.append("%s=%s" % (param_key,
+                                                            param_value))
+                else:
+                    # Aggregate required configuration to specific indexes
+                    for key_index, param_value in value.items():
+                        param_key = "%s[%s]" % (key, key_index)
+                        if current_mlx_config.get(param_key) and \
+                                str(param_value).lower() not in \
+                                current_mlx_config.get(param_key).lower():
+                            params_to_set.append("%s=%s" % (param_key,
+                                                            param_value))
+ 
+            elif current_mlx_config.get(key) and value.lower(
             ) not in current_mlx_config.get(key).lower():
                 # Aggregate all configurations required to be modified
                 params_to_set.append("%s=%s" % (key, value))
