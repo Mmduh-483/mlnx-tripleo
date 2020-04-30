@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import threading
 
+import six
 from six.moves import html_parser
 from six.moves.urllib import request as urlRequest
 from six.moves.urllib import error as urlError
@@ -17,6 +18,7 @@ FW_VERSION_REGEX = r'FW Version:\s*\t*(?P<fw_ver>\d+\.\d+\.\d+)'
 RUNNING_FW_VERSION_REGEX = r'FW Version\(Running\):\s*\t*(?P<fw_ver>\d+\.\d+\.\d+)'
 PSID_REGEX = r'PSID:\s*\t*(?P<psid>\w+)'
 ARRAY_VALUE_REGEX = r'Array\[(?P<first_index>\d+)\.\.(?P<last_index>\d+)\]'
+ARRAY_PARAM_REGEX = r'(?P<param_name>\w+)\[\d+\]'
 
 _DEV_WHITE_LIST = []
 _FORCE_UPDATE = False
@@ -101,7 +103,7 @@ class MlnxDevices(object):
                 continue
             dev = line.split()[0]
             if dev.endswith('.0') and (not self._dev_white_list or
-                    dev in self._dev_white_list):
+                                       dev in self._dev_white_list):
                 devs.append(dev)
         self._devs = devs
         LOG.info("Found Mellanox devices: %s", devs)
@@ -117,8 +119,20 @@ class MlnxDevices(object):
     def __iter__(self):
         return self._devs.__iter__()
 
-    def __next__(self):
-        return self._devs.__next__()
+
+class MlnxConfigParamMetaData(object):
+    """ Metadata about a single mlxconfig parameter"""
+
+    def __init__(self, name):
+        self.name = name
+
+class MlnxConfigArrayParamMetaData(MlnxConfigParamMetaData):
+    """ Metadata about a single mlxconfig array parameter"""
+
+    def __init__(self, name, first_idx, last_idx):
+        super(MlnxConfigArrayParamMetaData, self).__init__(name)
+        self.first_index = int(first_idx)
+        self.last_index = int(last_idx)
 
 
 class MlnxDeviceConfig(object):
@@ -128,7 +142,8 @@ class MlnxDeviceConfig(object):
     def __init__(self, pci_dev):
         self.pci_dev = pci_dev
         self._tool_confs = None
-        self.arrayed_mlnx_config = {}
+        # NOTE(adrianc) ATM contains only array type parameter metadata
+        self.mlnx_config_array_param_metadata = {}
 
     def _mstconfig_parse_data(self, data):
         # Parsing the mstconfig out to json
@@ -141,29 +156,19 @@ class MlnxDeviceConfig(object):
                 break
         for i in range(c, len(data)):
             d = list(filter(None, data[i].strip().split()))
-            array_value = re.match(ARRAY_VALUE_REGEX, d[1])
-            if array_value:
-                first_index = array_value.group('first_index')
-                last_index =  array_value.group('last_index')
-                self.arrayed_mlnx_config[d[0]] = [first_index, last_index]
-                array_param_dict = self.get_device_conf_dict("%s[%s..%s]" % (
-                        d[0], first_index, last_index))
-                for key, value in array_param_dict.items():
-                    r[key] = value
-                    continue
             r[d[0]] = d[1]
         return r
 
     def get_device_conf_dict(self, param_name=None):
-        """ Get device Configurations or a specific one
+        """ Get device Configurations
 
-        :param param_name: configuration name
+        :param param_name: if provided retireve only given configuration
         :return:  dict {"PARAM_NAME": "Param value", ....}
         """
         LOG.info("Getting configurations for device: %s" % self.pci_dev)
         cmd = ["mstconfig", "-d", self.pci_dev, "q"]
-        if param:
-            cmd.append(param)
+        if param_name:
+            cmd.append(param_name)
         out = run_command(*cmd)
         return self._mstconfig_parse_data(out)
 
@@ -175,8 +180,76 @@ class MlnxDeviceConfig(object):
         :return: bool
         """
         if self._tool_confs is None:
-            self._tool_confs = run_command("mstconfig", "-d", self.pci_dev, "i")
+            self._tool_confs = run_command(
+                "mstconfig", "-d", self.pci_dev, "i")
+        # trim any array index if present
+        indexed_param = re.match(ARRAY_PARAM_REGEX, param_name)
+        if indexed_param:
+            param_name = indexed_param.group('param_name')
         return param_name in self._tool_confs
+
+    def _build_config_param_metadata_map(self, conf_dict):
+        self.mlnx_config_array_param_metadata = {}
+        for param_name, val in six.iteritems(conf_dict):
+            array_val = re.match(ARRAY_VALUE_REGEX, val)
+            if array_val:
+                # Array parameter, extract first/last index
+                first_index = array_val.group('first_index')
+                last_index = array_val.group('last_index')
+                self.mlnx_config_array_param_metadata[param_name] = \
+                    MlnxConfigArrayParamMetaData(
+                        param_name, first_index, last_index)
+
+    def _inflate_array_param_vals_from_query(self, conf_dict):
+        """ Inflate provided conf dict with all values of array parameter"""
+        inflated_conf = {}
+        for param_name, val in six.iteritems(conf_dict):
+            if param_name in self.mlnx_config_array_param_metadata:
+                param_meta = self.mlnx_config_array_param_metadata[param_name]
+                first = param_meta.first_index
+                last = param_meta.last_index
+                arr_param_val = self.get_device_conf_dict(
+                    param_name="%s[%s..%s]" % (param_name, first, last))
+                # Add new keys to dict
+                for k, v in six.iteritems(arr_param_val):
+                    inflated_conf[k] = v
+            else:
+                inflated_conf[param_name] = val
+        return inflated_conf
+
+    def _inflate_single_array_input_val(self, param_name, val):
+        conf_dict = {} 
+        param_meta = self.mlnx_config_array_param_metadata[param_name]
+        if '*' in val:
+            if len(val) != 1:
+                LOG.error(
+                    "Invalid input for provided array type parameter. %s:%s"
+                    % (param_name, val))
+                return conf_dict
+
+            first = param_meta.first_index
+            last = param_meta.last_index
+
+            for idx in range(first, last + 1):
+                conf_dict["%s[%s]" % (param_name, idx)] = val['*']
+        else:
+            for idx, idx_val in six.iteritems(val):
+                conf_dict["%s[%s]" % (param_name, idx)] = idx_val
+        return conf_dict
+
+    def _inflate_array_param_vals_from_input(self, conf_dict):
+        """ Inflate provided conf dict with all values of array parameter"""
+        inflated_conf = {}
+        for param_name, val in six.iteritems(conf_dict):
+            if param_name in self.mlnx_config_array_param_metadata:
+                exp_inp = self._inflate_single_array_input_val(param_name, val)
+                # Add to conf_dict
+                for k, v in six.iteritems(exp_inp):
+                    inflated_conf[k] = v
+            else:
+                inflated_conf[param_name] = val
+
+        return inflated_conf
 
     def set_config(self, conf_dict):
         """ Set device configurations
@@ -186,36 +259,21 @@ class MlnxDeviceConfig(object):
         :return: None
         """
         current_mlx_config = self.get_device_conf_dict()
+        self._build_config_param_metadata_map(current_mlx_config)
+        current_mlx_config = self._inflate_array_param_vals_from_query(
+            current_mlx_config)
+        # inflate user input for array parameters
+        conf_dict = self._inflate_array_param_vals_from_input(conf_dict)
+
         params_to_set = []
         for key, value in conf_dict.items():
             if not self.param_supp_by_config_tool(key):
-                LOG.error("Configuraiton: %s is not supported by mstconfig,"
-                            " please update to the latest mstflint package." % key)
+                LOG.error(
+                    "Configuraiton: %s is not supported by mstconfig,"
+                    " please update to the latest mstflint package." % key)
                 continue
-            if key in self.arrayed_mlnx_config.keys():
-                if value.get('*'):
-                    # Aggregate required configuration for all the indexes
-                    first_index = int(self.arrayed_mlnx_config[key][0])
-                    last_index = int(self.arrayed_mlnx_config[key][1]) + 1
-                    param_value = value.get('*')
-                    for i in range(first_index, last_index):
-                        param_key = "%s[%s]" % (key, i)
-                        if current_mlx_config.get(param_key) and \
-                                param_value.lower() not in \
-                                current_mlx_config.get(param_key).lower():
-                            params_to_set.append("%s=%s" % (param_key,
-                                                            param_value))
-                else:
-                    # Aggregate required configuration to specific indexes
-                    for key_index, param_value in value.items():
-                        param_key = "%s[%s]" % (key, key_index)
-                        if current_mlx_config.get(param_key) and \
-                                str(param_value).lower() not in \
-                                current_mlx_config.get(param_key).lower():
-                            params_to_set.append("%s=%s" % (param_key,
-                                                            param_value))
  
-            elif current_mlx_config.get(key) and value.lower(
+            if current_mlx_config.get(key) and value.lower(
             ) not in current_mlx_config.get(key).lower():
                 # Aggregate all configurations required to be modified
                 params_to_set.append("%s=%s" % (key, value))
@@ -408,7 +466,7 @@ class MlnxDevFirmwareOps(object):
         """
         self.query_device(force=True)
         next_boot_image_newer = 'running_fw_ver' in self.dev_info and \
-               self.dev_info['running_fw_ver'] < self.dev_info['fw_ver']
+                                self.dev_info['running_fw_ver'] < self.dev_info['fw_ver']
         if next_boot_image_newer:
             mandatory_params = ["ESWITCH_IPV4_TTL_MODIFY_ENABLE",
                                 "PRIO_TAG_REQUIRED_EN"]
