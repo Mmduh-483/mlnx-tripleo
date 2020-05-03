@@ -220,20 +220,24 @@ class MlnxDeviceConfig(object):
     def _inflate_single_array_input_val(self, param_name, val):
         conf_dict = {} 
         param_meta = self.mlnx_config_array_param_metadata[param_name]
+        first = param_meta.first_index
+        last = param_meta.last_index
+
         if '*' in val:
             if len(val) != 1:
-                LOG.error(
+                raise RuntimeError(
                     "Invalid input for provided array type parameter. %s:%s"
                     % (param_name, val))
-                return conf_dict
-
-            first = param_meta.first_index
-            last = param_meta.last_index
 
             for idx in range(first, last + 1):
                 conf_dict["%s[%s]" % (param_name, idx)] = val['*']
         else:
             for idx, idx_val in six.iteritems(val):
+                if idx not in range(first, last + 1):
+                    LOG.warning(
+                        "Provided array param index(%s) is out of range "
+                        "[%s..%s] skipping...", idx, first, last)
+                    continue
                 conf_dict["%s[%s]" % (param_name, idx)] = idx_val
         return conf_dict
 
