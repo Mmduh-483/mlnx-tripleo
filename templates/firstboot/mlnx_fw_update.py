@@ -233,12 +233,12 @@ class MlnxDeviceConfig(object):
                 conf_dict["%s[%s]" % (param_name, idx)] = val['*']
         else:
             for idx, idx_val in six.iteritems(val):
-                if idx not in range(first, last + 1):
+                if int(idx) not in range(first, last + 1):
                     LOG.warning(
                         "Provided array param index(%s) is out of range "
                         "[%s..%s] skipping...", idx, first, last)
                     continue
-                conf_dict["%s[%s]" % (param_name, idx)] = idx_val
+                conf_dict["%s[%s]" % (param_name, idx)] = str(idx_val)
         return conf_dict
 
     def _inflate_array_param_vals_from_input(self, conf_dict):

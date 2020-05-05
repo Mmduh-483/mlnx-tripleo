@@ -43,19 +43,21 @@ parameters:
   ESWITCH_HAIRPIN_TOT_BUFFER_SIZE:
     type: json
     default: {"*": "17"}
-    description: If a single key of "*" is provided, then its value will set to all indexes.
-                 If you need to set configuration for a set of specific indexes, you can pass the
-                 value as below for index 2 to be 17 and index 3 to be 16
-                 Example, {"2": "17", "3": "16"}
-                 Make sure to choose only the PCI ends with 0
+    description: >
+      If a single key of "*" is provided, then its value will set to all indexes.
+      If you need to set configuration for a set of specific indexes, you can pass the
+      value as below for index 2 to be 17 and index 3 to be 16
+      Example, {"2": "17", "3": "16"}
+      Make sure to choose only the PCI ends with 0
   ESWITCH_HAIRPIN_DESCRIPTORS:
     type: json
     default: {"*": "11"}
-    description: If a single key of "*" is provided, then its value will set to all indexes.
-                 If you need to set configuration for a set of specific indexes, you can pass the
-                 value as below for index 2 to be 17 and index 3 to be 16
-                 Example, {"2": "17", "3": "16"}
-                 Make sure to choose only the PCI ends with 0
+    description: >
+      If a single key of "*" is provided, then its value will set to all indexes.
+      If you need to set configuration for a set of specific indexes, you can pass the
+      value as below for index 2 to be 17 and index 3 to be 16
+      Example, {"2": "17", "3": "16"}
+      Make sure to choose only the PCI ends with 0
 
 resources:
   userdata:
@@ -110,8 +112,8 @@ resources:
                 "LINK_TYPE_P2": "$LINK_TYPE",
                 "ESWITCH_IPV4_TTL_MODIFY_ENABLE": "$ESWITCH_IPV4_TTL_MODIFY_ENABLE",
                 "PRIO_TAG_REQUIRED_EN": "$PRIO_TAG_REQUIRED_EN",
-                "ESWITCH_HAIRPIN_TOT_BUFFER_SIZE": "$ESWITCH_HAIRPIN_TOT_BUFFER_SIZE",
-                "ESWITCH_HAIRPIN_DESCRIPTORS": "$ESWITCH_HAIRPIN_DESCRIPTORS"
+                "ESWITCH_HAIRPIN_TOT_BUFFER_SIZE": $ESWITCH_HAIRPIN_TOT_BUFFER_SIZE,
+                "ESWITCH_HAIRPIN_DESCRIPTORS": $ESWITCH_HAIRPIN_DESCRIPTORS
             }
 
 
@@ -305,12 +307,12 @@ resources:
                             conf_dict["%s[%s]" % (param_name, idx)] = val['*']
                     else:
                         for idx, idx_val in six.iteritems(val):
-                            if idx not in range(first, last + 1):
+                            if int(idx) not in range(first, last + 1):
                                 LOG.warning(
                                     "Provided array param index(%s) is out of range "
                                     "[%s..%s] skipping...", idx, first, last)
                                 continue
-                            conf_dict["%s[%s]" % (param_name, idx)] = idx_val
+                            conf_dict["%s[%s]" % (param_name, idx)] = str(idx_val)
                     return conf_dict
 
                 def _inflate_array_param_vals_from_input(self, conf_dict):
