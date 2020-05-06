@@ -1,0 +1,95 @@
+heat_template_version: queens
+
+description: >
+  This's a temporary workaround for upgrading Mellanox FW
+  and configuring Sriov in the FW
+
+parameters:
+  BIN_DIR_URL:
+    type: string
+    default: ''
+    description: 'URL of a directory containing Mellanox NIC Firmware'
+  FORCE_UPDATE:
+    type: boolean
+    default: False
+    description: "Force update the fw even if it's older version"
+  DEV_WHITE_LIST:
+    type: comma_delimited_list
+    default: []
+    description: list of MLNX devices PCIs to be processed.
+                 If the value is empty, all MLNX devices will be processed.
+                 Example, ['0000:04:00.0', '0000:81:00.0']
+                 Make sure to choose only the PCI ends with 0
+  NUM_OF_VFS:
+    type: number
+    default: 32
+    description: 'Max number of vfs'
+  SRIOV_EN:
+    type: boolean
+    default: True
+    description: 'Enable/Disable Sriov'
+  LINK_TYPE:
+    type: string
+    default: 'eth'
+    description: 'Link type ["eth", "ib"]'
+  ESWITCH_IPV4_TTL_MODIFY_ENABLE:
+    type: boolean
+    default: False
+    description: 'Enable TTL modification by E-Switch'
+  PRIO_TAG_REQUIRED_EN:
+    type: boolean
+    default: False
+    description: 'Priority tag required'
+  ESWITCH_HAIRPIN_TOT_BUFFER_SIZE:
+    type: json
+    default: {"*": "17"}
+    description: >
+      If a single key of "*" is provided, then its value will set to all indexes.
+      If you need to set configuration for a set of specific indexes, you can pass the
+      value as below for index 2 to be 17 and index 3 to be 16
+      Example, {"2": "17", "3": "16"}
+      Make sure to choose only the PCI ends with 0
+  ESWITCH_HAIRPIN_DESCRIPTORS:
+    type: json
+    default: {"*": "11"}
+    description: >
+      If a single key of "*" is provided, then its value will set to all indexes.
+      If you need to set configuration for a set of specific indexes, you can pass the
+      value as below for index 2 to be 17 and index 3 to be 16
+      Example, {"2": "17", "3": "16"}
+      Make sure to choose only the PCI ends with 0
+
+resources:
+  userdata:
+    type: OS::Heat::MultipartMime
+    properties:
+      parts:
+      - config: {get_resource: mellanox_fw_update}
+
+  mellanox_fw_update:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          template: |
+{% for line in mlnx_fw_update -%}{% if line != '\n' %}            {{line}}{% else %}{{line}}{% endif %}{% endfor %}
+          params:
+            $BIN_DIR_URL: {get_param: BIN_DIR_URL}
+            $FORCE_UPDATE: {get_param: FORCE_UPDATE}
+            $DEV_WHITE_LIST: {get_param: DEV_WHITE_LIST}
+            $NUM_OF_VFS: {get_param: NUM_OF_VFS}
+            $SRIOV_EN: {get_param: SRIOV_EN}
+            $LINK_TYPE: {get_param: LINK_TYPE}
+            $ESWITCH_IPV4_TTL_MODIFY_ENABLE: {get_param: ESWITCH_IPV4_TTL_MODIFY_ENABLE}
+            $PRIO_TAG_REQUIRED_EN: {get_param: PRIO_TAG_REQUIRED_EN}
+            $ESWITCH_HAIRPIN_TOT_BUFFER_SIZE: {get_param: ESWITCH_HAIRPIN_TOT_BUFFER_SIZE}
+            $ESWITCH_HAIRPIN_DESCRIPTORS: {get_param: ESWITCH_HAIRPIN_DESCRIPTORS}
+
+
+outputs:
+  # This means get_resource from the parent template will get the userdata, see:
+  # http://docs.openstack.org/developer/heat/template_guide/composition.html#making-your-template-resource-more-transparent
+  # Note this is new-for-kilo, an alternative is returning a value then using
+  # get_attr in the parent template instead.
+  OS::stack_id:
+    value: {get_resource: userdata}

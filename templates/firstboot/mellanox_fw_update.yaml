@@ -88,7 +88,6 @@ resources:
 
             from oslo_concurrency import processutils
 
-
             FW_VERSION_REGEX = r'FW Version:\s*\t*(?P<fw_ver>\d+\.\d+\.\d+)'
             RUNNING_FW_VERSION_REGEX = r'FW Version\(Running\):\s*\t*(?P<fw_ver>\d+\.\d+\.\d+)'
             PSID_REGEX = r'PSID:\s*\t*(?P<psid>\w+)'
@@ -99,6 +98,7 @@ resources:
             _FORCE_UPDATE = $FORCE_UPDATE
             _BIN_DIR_URL = "$BIN_DIR_URL"
 
+            # TODO(adrianc): add configurable parameter for logging
             logging.basicConfig(
                 filename='/var/log/mellnox_fw_update.log',
                 filemode='w',
@@ -658,6 +658,7 @@ resources:
 
             if __name__ == '__main__':
                 main()
+
           params:
             $BIN_DIR_URL: {get_param: BIN_DIR_URL}
             $FORCE_UPDATE: {get_param: FORCE_UPDATE}

@@ -9,8 +9,8 @@ import threading
 
 import six
 from six.moves import html_parser
-from six.moves.urllib import request as urlRequest
 from six.moves.urllib import error as urlError
+from six.moves.urllib import request as urlRequest
 
 from oslo_concurrency import processutils
 
@@ -20,9 +20,9 @@ PSID_REGEX = r'PSID:\s*\t*(?P<psid>\w+)'
 ARRAY_VALUE_REGEX = r'Array\[(?P<first_index>\d+)\.\.(?P<last_index>\d+)\]'
 ARRAY_PARAM_REGEX = r'(?P<param_name>\w+)\[\d+\]'
 
-_DEV_WHITE_LIST = []
-_FORCE_UPDATE = False
-_BIN_DIR_URL = ""
+_DEV_WHITE_LIST = $DEV_WHITE_LIST
+_FORCE_UPDATE = $FORCE_UPDATE
+_BIN_DIR_URL = "$BIN_DIR_URL"
 
 # TODO(adrianc): add configurable parameter for logging
 logging.basicConfig(
@@ -32,14 +32,14 @@ logging.basicConfig(
 LOG = logging.getLogger("mellnox_fw_update")
 
 _MLX_CONFIG = {
-    "SRIOV_EN": "True",
-    "NUM_OF_VFS": "32",
-    "LINK_TYPE_P1": "eth",
-    "LINK_TYPE_P2": "eth",
-    "ESWITCH_IPV4_TTL_MODIFY_ENABLE": "False",
-    "PRIO_TAG_REQUIRED_EN": "False",
-    "ESWITCH_HAIRPIN_TOT_BUFFER_SIZE": {"*": "17"},
-    "ESWITCH_HAIRPIN_DESCRIPTORS": {"*": "11"}
+    "SRIOV_EN": "$SRIOV_EN",
+    "NUM_OF_VFS": "$NUM_OF_VFS",
+    "LINK_TYPE_P1": "$LINK_TYPE",
+    "LINK_TYPE_P2": "$LINK_TYPE",
+    "ESWITCH_IPV4_TTL_MODIFY_ENABLE": "$ESWITCH_IPV4_TTL_MODIFY_ENABLE",
+    "PRIO_TAG_REQUIRED_EN": "$PRIO_TAG_REQUIRED_EN",
+    "ESWITCH_HAIRPIN_TOT_BUFFER_SIZE": $ESWITCH_HAIRPIN_TOT_BUFFER_SIZE,
+    "ESWITCH_HAIRPIN_DESCRIPTORS": $ESWITCH_HAIRPIN_DESCRIPTORS
 }
 
 
@@ -218,7 +218,7 @@ class MlnxDeviceConfig(object):
         return inflated_conf
 
     def _inflate_single_array_input_val(self, param_name, val):
-        conf_dict = {} 
+        conf_dict = {}
         param_meta = self.mlnx_config_array_param_metadata[param_name]
         first = param_meta.first_index
         last = param_meta.last_index
@@ -276,7 +276,7 @@ class MlnxDeviceConfig(object):
                     "Configuraiton: %s is not supported by mstconfig,"
                     " please update to the latest mstflint package." % key)
                 continue
- 
+
             if current_mlx_config.get(key) and value.lower(
             ) not in current_mlx_config.get(key).lower():
                 # Aggregate all configurations required to be modified

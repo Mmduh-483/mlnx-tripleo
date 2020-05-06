@@ -1,0 +1,12 @@
+# Development
+
+## Template creation
+`mellanox_fw_update.yaml` is rendered from a template.
+The rendering process embeds `mlnx_fw_update.py` into the template. Which later
+can be used for Triple-O OpenStack deployments during firstboot stage.
+
+To generate the rendered template run:
+```commandline
+# pip install -U jinja2
+# ./gen_yaml_from_template.py
+```
