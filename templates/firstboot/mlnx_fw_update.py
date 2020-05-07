@@ -550,7 +550,7 @@ def process_device(pci_dev, psid_map):
             else:
                 LOG.info("Firmware update is not required for Device.")
         else:
-            LOG.warning("No firmware binary found for device %s with "
+            LOG.info("No firmware binary found for device %s with "
                         "PSID: %s, skipping...", pci_dev, dev_psid)
         # check if reset is required.
         # Note: device Reset is required if a newer firmware version was burnt
@@ -569,14 +569,15 @@ def main():
     # discover devices
     mlnx_devices = MlnxDevices(_DEV_WHITE_LIST)
     mlnx_devices.discover()
-    # get binaries
-    binary_getter = MlnxFirmwareBinariesFetcher(_BIN_DIR_URL)
-    fw_binaries = binary_getter.get_firmware_binaries()
-    # prep psid map
+    # get binaries and prep psid map
     psid_map = {}
-    for fw_bin in fw_binaries:
-        image_info = fw_bin.get_info()
-        psid_map[image_info['psid']] = image_info
+    if _BIN_DIR_URL:
+        binary_getter = MlnxFirmwareBinariesFetcher(_BIN_DIR_URL)
+        fw_binaries = binary_getter.get_firmware_binaries()
+
+        for fw_bin in fw_binaries:
+            image_info = fw_bin.get_info()
+            psid_map[image_info['psid']] = image_info
     # process devices
     for pci_dev in mlnx_devices:
         process_device(pci_dev, psid_map)
