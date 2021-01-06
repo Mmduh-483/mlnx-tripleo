@@ -68,6 +68,7 @@ ifcfg_interfaces_map = OrderedDict()
 mlnx_vfs_pci_list = []
 
 logging.basicConfig(filename=LOG_FILE,
+                    format='%(asctime)s %(levelname)-8s %(message)s',
                     level=logging.INFO,
                     datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger(__name__)
@@ -338,7 +339,7 @@ def configure_sriov_pfs(sriov_pfs, from_sriov_service=False):
     global mlnx_vfs_pci_list
     logger.info("Configuring sriov pfs..")
     trigger_udev_rule = False
-    rep_link_name_script =False
+    rep_link_name_script = False
 
     for sriov_pf in sriov_pfs:
         # Create vfs
