@@ -68,7 +68,8 @@ ifcfg_interfaces_map = OrderedDict()
 mlnx_vfs_pci_list = []
 
 logging.basicConfig(filename=LOG_FILE,
-                    level=logging.INFO)
+                    level=logging.INFO,
+                    datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger(__name__)
 
 
