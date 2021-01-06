@@ -1,0 +1,31 @@
+configVersion: 1.0
+hwOffloadEnabled: True
+pfs:
+  - name: ens2f0
+    numOfVfs: 8
+    switchdev: True
+    vfTrust: True
+  - name: ens2f1
+    numOfVfs: 8
+    switchdev: True
+    vfTrust: True 
+  - name: ens1f0
+    numOfVfs: 8
+    switchdev: True
+    vfTrust: True
+  - name: ens1f1
+    numOfVfs: 8
+    switchdev: True
+    vfTrust: True
+linuxBonds:
+  - name: bond0
+    slaves: [ens2f0, ens2f1]
+    bondingOptions: "mode=802.3ad miimon=100 lacp_rate=fast xmit_hash_policy=layer2+3"
+  - name: bond1
+    slaves: [ens1f0, ens1f1]
+    bondingOptions: "mode=802.3ad miimon=100 lacp_rate=fast xmit_hash_policy=layer2+3"
+ovsBridges:
+  - name: br0
+    ports:  [bond0]
+  - name: br1
+    ports: [bond1]
