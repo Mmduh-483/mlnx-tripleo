@@ -44,33 +44,33 @@ List of ovs bridges which need to be created and configured
     - ports: List of ovs bridge ports (a subset of sriov pfs or linux bonds)  
 
 ## Install  
-Prepare you own config.yaml file with all the configuration you need and pass it to installation script or you can copy it directly to /etc/switchdev-config/config.yaml before execution  
+Prepare your own config.yaml file with all the configuration you need and pass it to installation script or you can copy it directly to `/etc/switchdev-config/config.yaml` before execution  
 Install will do the following
-- create /etc/switchdev-config directory  
-- copy switchdev_network_config and uninstall.sh to /etc/switchdev-config directory  
-- optionally copy configuration file to /etc/switchdev-config directory  
+- create `/etc/switchdev-config directory`    
+- copy switchdev_network_config and uninstall.sh to `/etc/switchdev-config` directory  
+- optionally copy configuration file to `/etc/switchdev-config directory`    
 
 Run:  
 ```$ bash ./install.sh [config.yaml]```  
 
 ## Execution
-Make sure that you have your own config yaml file here "/etc/switchdev-config/config.yaml" then run the script:  
+Make sure that you have your own config yaml file here `/etc/switchdev-config/config.yaml` then run the script:  
 ```$ /etc/switchdev-config/switchdev_network_config```  
 **Note:**
 - You can rerun the script on any configuration change
-- Log file is created here /var/log/switchdev_network_config.log  
+- Log file is created here `/var/log/switchdev_network_config.log`  
 
 
 ## Uninstall
 Uninstall will do the following:
-- remove /etc/switchdev-config/switchdev_network_config script
+- remove `/etc/switchdev-config/switchdev_network_config` script
 - disable and remove sriov_config service  
 - disable and remove sriov_bind service  
 
 Run:  
 ```$ bash /etc/switchdev-config/uninstall.sh```
 **Note:**
-- Current configuration for sriov pfs will stay exist until you do reboot
-- network configuration (bonds and bridges) will stay after reboot unless you clean them manually:
-  - removing relevant network-scripts in /etc/sysconfig/network-scripts/  
-  - deleting ovs_bridges using ```ovs-vsctl del-br <br-name>```  
+- SR-IOV PF configuration will reset after reboot
+- Network configuration (bonds and bridges) will stay after reboot unless you clean them manually:
+  - Removing relevant network-scripts in `/etc/sysconfig/network-scripts/`  
+  - Deleting ovs_bridges using ```ovs-vsctl del-br <br-name>```  

@@ -12,9 +12,9 @@ import yaml
 
 from collections import OrderedDict
 
-
-VERSION_MAJOR = 1
-VERSION_MINOR = 0
+VERSION = "1.0.0"
+CONF_VERSION_MAJOR = 1
+CONF_VERSION_MINOR = 0
 CONFIG_FILE = "/etc/switchdev-config/config.yaml"
 LOG_FILE = '/var/log/switchdev_network_config.log'
 
@@ -44,7 +44,7 @@ MAX_RETRIES = 10
 SRIOV_CONFIG_SERVICE_FILE = "/etc/systemd/system/sriov_config.service"
 SRIOV_CONFIG_SERVICE_CONTENT = """[Unit]
 Description=SR-IOV numvfs configuration
-After=systemd-udev-settle.service
+After=systemd-udev-settle.service openibd.service
 Before=openvswitch.service network.service
 [Service]
 Type=oneshot
@@ -268,7 +268,6 @@ def add_udev_rule_for_vf_representors(sriov_pf):
                                                  pf_fun_num,
                                                  REP_LINK_NAME_FILE,
                                                  sriov_pf)
-    create_rep_link_name_script()
     return add_udev_rule(udev_data_line, UDEV_RULE_FILE)
 
 
@@ -338,6 +337,7 @@ def configure_sriov_pfs(sriov_pfs, from_sriov_service=False):
     global mlnx_vfs_pci_list
     logger.info("Configuring sriov pfs..")
     trigger_udev_rule = False
+    rep_link_name_script =False
 
     for sriov_pf in sriov_pfs:
         # Create vfs
@@ -367,6 +367,7 @@ def configure_sriov_pfs(sriov_pfs, from_sriov_service=False):
         vendor_id = get_vendor_id(sriov_pf_name)
         if (sriov_pf.get("switchdev") and
                 vendor_id == MLNX_VENDOR_ID):
+            rep_link_name_script = True
             vf_pci_list = get_vf_pci_list(sriov_pf_name)
             mlnx_vfs_pci_list += vf_pci_list
             for vf_pci in vf_pci_list:
@@ -386,6 +387,8 @@ def configure_sriov_pfs(sriov_pfs, from_sriov_service=False):
             sriov_pf_data = "%sDEVICE=%s\n" % (COMMON_IFCFG_DATA,
                                                sriov_pf_name)
             ifcfg_interfaces_map[sriov_pf_name] = sriov_pf_data
+    if rep_link_name_script:
+        create_rep_link_name_script()
     if mlnx_vfs_pci_list:
         update_sriov_bind_pci_list(mlnx_vfs_pci_list)
     if trigger_udev_rule:
@@ -522,35 +525,36 @@ def parse_version(version):
     version_major = 0
     version_minor = 0
     try:
-        version_float = float(version)
-        version_major = int(version_float)
-        version_minor = int(str(version_float-int(version_float))[2:])
+        version_split = str(version).split('.')
+        version_major = int(version_split[0])
+        version_minor = int(version_split[1])
     except Exception as err:
-        logger.error("configVersion is not provied in config.yaml file or is"
-                     " incorrect, Please provide configVersion as X.X\n%s" %
-                     str(err))
+        logger.error("configVersion is not provied in config.yaml file or"
+                     "it's incorrect. Please provide configVersion as X.X\n%s"
+                     % str(err))
         raise err
     return version_major, version_minor
 
 
 def validate_config(config):
-    # validate_config is just a quick validation indicates if the user has
+    # Validate_config is just a quick validation indicates if the user has
     # typo or missing mandatory prams
-    # TODO//
-    # Define a schema for config.yaml file to do full config validation
+    # TODO:
+    # - Define a schema for the configuration file
+    # - Validate all params data type
+    # - Notify the user with unused params
 
     sriov_pfs_list = []
     bonds_list = []
-    version = config.get("configVersion")
-    version_major, version_minor = parse_version(version)
-    if version_major > VERSION_MAJOR:
-        err = "Provided Major version is upper than current one. Exiting.."
+    conf_version = config.get("configVersion")
+    conf_version_major, conf_version_minor = parse_version(conf_version)
+    if conf_version_major > CONF_VERSION_MAJOR:
+        err = "Provided configuration version is not supported. Exiting.."
         logger.error(err)
         raise(RuntimeError(err))
-    if version_minor > VERSION_MINOR:
-        logger.debug("Provided Minor version is upper than current one, new"
-                     "optional functionality may not be handled in this"
-                     "script")
+    if conf_version_minor > CONF_VERSION_MINOR:
+        logger.debug("Provided configuration version newer, new functionality"
+                     " may not be handled by this script")
 
     for sriov_pf in config.get("pfs"):
         if sriov_pf.get("name"):
@@ -606,7 +610,6 @@ def validate_config(config):
 
 
 def parse_opts(argv):
-
     parser = argparse.ArgumentParser(
         description='SR-IOV, OVS and network configuration service'
         'for switchdev and VF-LAG configuration')
@@ -626,7 +629,7 @@ def parse_opts(argv):
     parser.add_argument(
         '-v', '--version',
         action='version',
-        version="%d.%d" % (VERSION_MAJOR, VERSION_MINOR))
+        version=VERSION)
 
     opts = parser.parse_args(argv[1:])
 
@@ -635,20 +638,14 @@ def parse_opts(argv):
 
 def main(argv=sys.argv):
     opts = parse_opts(argv)
-
     config = get_config()
     validate_config(config)
     sriov_pfs = config.get("pfs")
     bonds = config.get("linuxBonds")
     bridges = config.get("ovsBridges")
     hw_offload_enabled = config.get("hwOffloadEnabled")
-    if opts.sriov_config:
-        configure_sriov_pfs(sriov_pfs, True)
 
-    elif opts.sriov_bind:
-        bind_vfs()
-
-    else:
+    if (not opts.sriov_config and not opts.sriov_bind):
         # Configure sriov pfs
         configure_sriov_pfs(sriov_pfs)
         configure_sriov_config_service()
@@ -672,6 +669,14 @@ def main(argv=sys.argv):
         # Bind vfs
         bind_vfs(mlnx_vfs_pci_list)
         configure_sriov_bind_service()
+    else:
+        if opts.sriov_config:
+            # Configure sriov pfs
+            configure_sriov_pfs(sriov_pfs, True)
+
+        if opts.sriov_bind:
+            # Bind vfs
+            bind_vfs()
 
 
 if __name__ == '__main__':
