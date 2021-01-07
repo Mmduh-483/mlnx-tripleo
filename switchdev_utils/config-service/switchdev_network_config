@@ -572,19 +572,18 @@ def validate_config(config):
         try:
             int(sriov_pf.get("numOfVfs"))
         except ValueError as value_err:
-            err = "numOfVfs for %s must be number" % sriov_pf.get("name")
-            logger.error(err)
+            logger.error("numOfVfs for %s must be number" %
+                         sriov_pf.get("name"))
             raise value_err
         except TypeError as type_err:
-            err = "numOfVfs for %s must be provided" % sriov_pf.get("name")
-            logger.error(err)
+            logger.error("numOfVfs for %s must be provided" %
+                         sriov_pf.get("name"))
             raise type_err
         if sriov_pf.get("mtu"):
             try:
                 int(sriov_pf.get("mtu"))
             except ValueError as value_err:
-                err = "mtu %s must be number" % sriov_pf.get("mtu")
-                logger.error(err)
+                logger.error("mtu %s must be number" % sriov_pf.get("mtu"))
                 raise value_err
 
     for bond in config.get("linuxBonds"):
@@ -611,8 +610,7 @@ def validate_config(config):
             try:
                 int(bond.get("mtu"))
             except ValueError as value_err:
-                err = "mtu %s must be number" % bond.get("mtu")
-                logger.error(err)
+                logger.error("mtu %s must be number" % bond.get("mtu"))
                 raise value_err
     for bridge in config.get("ovsBridges"):
         if not bridge.get("name"):
@@ -667,6 +665,8 @@ def main(argv=sys.argv):
     hw_offload_enabled = config.get("hwOffloadEnabled")
 
     if (not opts.sriov_config and not opts.sriov_bind):
+        # Running switchdev network config for the first time
+        logger.info("Running switchdev network config for the first time")
         # Configure sriov pfs
         configure_sriov_pfs(sriov_pfs)
         configure_sriov_config_service()
