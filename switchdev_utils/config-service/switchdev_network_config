@@ -388,6 +388,8 @@ def configure_sriov_pfs(sriov_pfs, from_sriov_service=False):
         if not from_sriov_service:
             sriov_pf_data = "%sDEVICE=%s\n" % (COMMON_IFCFG_DATA,
                                                sriov_pf_name)
+            if sriov_pf.get("mtu"):
+                sriov_pf_data += "MTU=%s\n" % sriov_pf.get("mtu")
             ifcfg_interfaces_map[sriov_pf_name] = sriov_pf_data
     if rep_link_name_script:
         create_rep_link_name_script()
@@ -416,6 +418,8 @@ def configure_linux_bonds(linux_bonds):
         bond_data = "%s%sDEVICE=%s\n" % (COMMON_IFCFG_DATA,
                                          bonding_options_data,
                                          bond)
+        if linux_bond.get("mtu"):
+            bond_data += "MTU=%s\n" % linux_bond.get("mtu")
         ifcfg_interfaces_map[bond] = bond_data
         slaves_data = "SLAVE=yes\nMASTER=%s\n" % bond
         for slave in bond_slaves:
@@ -566,15 +570,23 @@ def validate_config(config):
             logger.error(err)
             raise ValueError(err)
         try:
-            if int(sriov_pf.get("numOfVfs")):
-                continue
+            int(sriov_pf.get("numOfVfs"))
         except ValueError as value_err:
-            logger.error("numOfVfs for %s must be number" %
-                         sriov_pf.get("name"))
+            err = "numOfVfs for %s must be number" % sriov_pf.get("name")
+            logger.error(err)
             raise value_err
         except TypeError as type_err:
-            logger.error("numOfVfs for %s must be provided" %
-                         sriov_pf.get("name"))
+            err = "numOfVfs for %s must be provided" % sriov_pf.get("name")
+            logger.error(err)
+            raise type_err
+        if sriov_pf.get("mtu"):
+            try:
+                int(sriov_pf.get("mtu"))
+            except ValueError as value_err:
+                err = "mtu %s must be number" % sriov_pf.get("mtu")
+                logger.error(err)
+                raise value_err
+
     for bond in config.get("linuxBonds"):
         if bond.get("name"):
             bonds_list.append(bond.get("name"))
@@ -589,12 +601,19 @@ def validate_config(config):
             raise ValueError(err)
         if (bond.get("slaves") and
                 (set(bond.get("slaves")).issubset(set(sriov_pfs_list)))):
-            continue
+            pass
         else:
             err = "slaves of bond %s must be list of sriov_pfs" % \
                   bond.get("name")
             logger.error(err)
             raise ValueError(err)
+        if bond.get("mtu"):
+            try:
+                int(bond.get("mtu"))
+            except ValueError as value_err:
+                err = "mtu %s must be number" % bond.get("mtu")
+                logger.error(err)
+                raise value_err
     for bridge in config.get("ovsBridges"):
         if not bridge.get("name"):
             err = "bridge name must be provided"
