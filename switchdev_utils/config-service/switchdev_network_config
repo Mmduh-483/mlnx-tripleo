@@ -600,7 +600,7 @@ def validate_config(config):
             raise ValueError(err)
         if (bond.get("slaves") and
                 (set(bond.get("slaves")).issubset(set(sriov_pfs_list)))):
-            pass
+            logger.debug("bond slaves are provided from sriov_pfs")
         else:
             err = "slaves of bond %s must be list of sriov_pfs" % \
                   bond.get("name")
@@ -620,7 +620,7 @@ def validate_config(config):
         if (bridge.get("ports") and
                 (set(bridge.get("ports")).issubset(set(sriov_pfs_list +
                                                    bonds_list)))):
-            continue
+            logger.debug("bridge ports are provided from sriov_pfs or bonds")
         else:
             err = "ports of bridge %s must be list of sriov_pfs or bonds" % \
                   bridge.get("name")
