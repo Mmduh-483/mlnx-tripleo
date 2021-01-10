@@ -33,15 +33,21 @@ List of SRIOV PF objects which need to be configured, and has the following attr
     - numOfVfs: Number of vfs to be configured on the sriov pf.  
     - switchdev: Boolean, Enable switchdev mode.  
     - vfTrust: Boolean, Configure vf trust.  
+    - mtu: Number, configure mtu for sriov_pf (it will be ignored if sriov_pf is a bond slave)
 - linuxBonds:  
 list of linux bond objects which need to be created and configured  
     - name: The name of the bond interface  
     - slaves: List of bond slaves interfaces (a subset of sriov pfs)  
     - bondingOptions: Bonding options of the bond interface  
+    - mtu: Number, configure mtu for bond interface and its slaves
 - ovsBridges:  
 List of ovs bridges which need to be created and configured  
     - name: The name of ovs bridge  
     - ports: List of ovs bridge ports (a subset of sriov pfs or linux bonds)  
+**Note:**
+  - Configure mtu for sriov_pf will be ignored if sriov_pf is a bond slave
+  - Configure mtu for bond interface will configure it to its slaves
+  - Configure mtu for sriov_pf will set it to the brdige if sriov_pf is ovs port
 
 ## Install  
 Prepare your own config.yaml file with all the configuration you need and pass it to installation script or you can copy it directly to `/etc/switchdev-config/config.yaml` before execution  
